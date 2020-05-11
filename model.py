@@ -12,7 +12,8 @@ eps = torch.autograd.Variable(torch.FloatTensor([1.e-8]), requires_grad=False)
 
 
 class DAGMM(nn.Module):
-    def __init__(self, compression_module, estimation_module, gmm_module):
+    def __init__(self, compression_module, estimation_module, gmm_module,
+            weight_1=0.1, weight_2=0.005):
         """
         Args:
             compression_module (nn.Module): an autoencoder model that
@@ -23,21 +24,25 @@ class DAGMM(nn.Module):
             gmm_module (nn.Module): a GMM model that implements its mixtures
                 as a list of Mixture classes. The GMM model should implement
                 the function `self._update_mixtures_parameters`.
+            weight_1 (float): a weight for the energy term in the loss function.
+            weight_2 (float): a weight for the penalty term in the loss function.
         """
         super().__init__()
 
         self.compressor = compression_module
         self.estimator = estimation_module
         self.gmm = gmm_module
+        self.weight_1 = weight_1
+        self.weight_2 = weight_2
 
-    def forward(self, input):
+    def forward(self, inputs):
         # Forward in the compression network.
-        encoded = self.compressor.encode(input)
+        encoded = self.compressor.encode(inputs)
         decoded = self.compressor.decode(encoded)
 
         # Preparing the input for the estimation network.
-        relative_ed = relative_euclidean_distance(input, decoded)
-        cosine_sim = cosine_similarity(input, decoded)
+        relative_ed = relative_euclidean_distance(inputs, decoded)
+        cosine_sim = cosine_similarity(inputs, decoded)
         # Adding a dimension to prepare for concatenation.
         relative_ed = relative_ed.view(-1, 1)
         cosine_sim = relative_ed.view(-1, 1)
@@ -52,6 +57,13 @@ class DAGMM(nn.Module):
                                                  mixtures_affiliations)
         # Estimating the energy of the samples.
         return self.gmm(latent_vectors)
+
+    def calc_loss(self, inputs):
+        reconstruction_loss = self.compressor.reconstruction_loss(inputs)
+        energy = self(inputs)
+        penalty = torch.sum(1. / torch.diagonal(self.gmm.Sigma, dim1=1, dim2=2))
+        print(reconstruction_loss, energy, penalty)
+        return reconstruction_loss + self.weight_1 * energy + self.weight_2 * penalty
 
 
 class DAGMMArrhythmia(DAGMM):
@@ -81,5 +93,3 @@ def cosine_similarity(x1, x2, eps=eps):
     dist_x1 = torch.norm(x1, p=2, dim=1)  # dim [batch_size]
     dist_x2 = torch.norm(x2, p=2, dim=1)  # dim [batch_size]
     return dot_prod / torch.max(dist_x1*dist_x2, eps)
-
-
