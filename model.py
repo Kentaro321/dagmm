@@ -13,7 +13,7 @@ eps = torch.autograd.Variable(torch.FloatTensor([1.e-8]), requires_grad=False)
 
 class DAGMM(nn.Module):
     def __init__(self, compression_module, estimation_module, gmm_module,
-            weight_1=0.1, weight_2=0.005):
+                 weight_1=0.1, weight_2=0.005):
         """
         Args:
             compression_module (nn.Module): an autoencoder model that
@@ -62,7 +62,6 @@ class DAGMM(nn.Module):
         reconstruction_loss = self.compressor.reconstruction_loss(inputs)
         energy = self(inputs)
         penalty = torch.sum(1. / torch.diagonal(self.gmm.Sigma, dim1=1, dim2=2))
-        print(reconstruction_loss, energy, penalty)
         return reconstruction_loss + self.weight_1 * energy + self.weight_2 * penalty
 
 
