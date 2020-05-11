@@ -15,5 +15,5 @@ class EstimationNetworkArrhythmia(nn.Module):
                                  nn.Linear(10, 2),
                                  nn.Softmax())
 
-    def forward(self, input):
-        return self.net(input)
+    def forward(self, inputs):
+        return self.net(inputs)

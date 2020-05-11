@@ -19,18 +19,18 @@ class CompressionNetworkArrhythmia(nn.Module):
 
         self._reconstruction_loss = nn.MSELoss()
 
-    def forward(self, input):
-        out = self.encoder(input)
+    def forward(self, inputs):
+        out = self.encoder(inputs)
         out = self.decoder(out)
 
         return out
 
-    def encode(self,  input):
-        return self.encoder(input)
+    def encode(self,  inputs):
+        return self.encoder(inputs)
 
-    def decode(self, input):
-        return self.decoder(input)
+    def decode(self, inputs):
+        return self.decoder(inputs)
 
-    def reconstruction_loss(self, input, target):
-        target_hat = self(input)
+    def reconstruction_loss(self, inputs, target):
+        target_hat = self(inputs)
         return self._reconstruction_loss(target_hat, target)
