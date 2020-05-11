@@ -31,6 +31,6 @@ class CompressionNetworkArrhythmia(nn.Module):
     def decode(self, inputs):
         return self.decoder(inputs)
 
-    def reconstruction_loss(self, inputs, target):
-        target_hat = self(inputs)
-        return self._reconstruction_loss(target_hat, target)
+    def reconstruction_loss(self, inputs):
+        reconstructed = self(inputs)
+        return torch.mean((inputs - reconstructed) ** 2)
