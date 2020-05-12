@@ -4,6 +4,8 @@ import numpy as np
 import torch
 from torch import nn
 
+EPS = 1e-6
+
 
 class GMM(nn.Module):
     """Implements a Gaussian Mixture Model."""
@@ -19,46 +21,47 @@ class GMM(nn.Module):
         self.num_mixtures = num_mixtures
         self.dimension_embedding = dimension_embedding
 
-        self.Phi = torch.rand(num_mixtures)
-        self.Phi = nn.Parameter(self.Phi, requires_grad=False)
-
-        self.mu = torch.randn(num_mixtures, dimension_embedding)
+        self.phi = torch.zeros(num_mixtures)
+        self.phi = nn.Parameter(self.phi, requires_grad=False)
+        self.mu = torch.zeros(num_mixtures, dimension_embedding)
         self.mu = nn.Parameter(self.mu, requires_grad=False)
+        self.sigma = torch.eye(dimension_embedding).repeat(num_mixtures, 1, 1)
+        self.sigma = nn.Parameter(self.sigma, requires_grad=False)
+        self.eps_sigma = EPS * torch.eye(dimension_embedding).repeat(num_mixtures, 1, 1)
+        self.eps_sigma = nn.Parameter(self.eps_sigma, requires_grad=False)
+        self.L = torch.cholesky(self.sigma + self.eps_sigma)
+        self.L = nn.Parameter(self.L, requires_grad=False)
+        # L is cholesky decomposition of self.sigma: LL^T = self.sigma
 
-        self.Sigma = torch.eye(dimension_embedding).repeat(num_mixtures, 1, 1)
-        self.Sigma = nn.Parameter(self.Sigma, requires_grad=False)
-        self.eps_Sigma = 1e-8 * torch.eye(dimension_embedding).repeat(num_mixtures, 1, 1)
-
-    def forward(self, inputs):
+    def forward(self, z):
         """Return the mean of energy.
 
         Args:
-            inputs (Variable of shape [batch_size, dimension_embedding]):
+            z (Variable of shape [batch_size, dimension_embedding]):
                 typically the input of the estimation network. The points
                 in the embedding space.
         """
-        dimension_embedding = inputs.shape[1]
+        logphi = torch.log(self.phi[:, None])
+        coef = 0.5 * self.dimension_embedding * np.log(2 * np.pi)
+        logdet = 2.0 * torch.sum(torch.log(torch.diagonal(self.L, dim1=1, dim2=2)), dim=1)[:, None]
 
-        logphi = torch.log(self.Phi)  # [num_mixtures]
-        coef = 0.5 * dimension_embedding * np.log(2 * np.pi)  # [1]
-        logdet = 0.5 * torch.logdet(self.Sigma)  # [num_mixtures]
-
-        diff = inputs[None] - self.mu[:, None]
+        diff = z[None] - self.mu[:, None]
         # diff has shape [num_mixtures, batch_size, dimension_embedding]
-        mahala = 0.5 * torch.sum(torch.matmul(diff, self.Sigma) * diff, dim=2)
+        diff = torch.triangular_solve(torch.transpose(diff, 1, 2), self.L).solution
+        # diff has shape [num_mixtures, dimension_embedding, batch_size]
+        mahala = 0.5 * torch.sum(diff**2, dim=1)
         # mahala has shape [num_mixtures, batch_size]
 
-        result = logphi[:, None] - coef - logdet[:, None] - mahala
-        result = torch.logsumexp(result, dim=0)
-        return -torch.mean(result)
+        result = logphi - coef - logdet - mahala
+        return -torch.logsumexp(result, dim=0)
 
-    def _update_mixtures_parameters(self, samples, mixtures_affiliations):
+    def _update_mixtures_parameters(self, z, gamma):
         """
         Args:
-            samples (Variable of shape [batch_size, dimension_embedding]):
+            z (Variable of shape [batch_size, dimension_embedding]):
                 typically the input of the estimation network. The points
                 in the embedding space.
-            mixtures_affiliations (Variable of shape [batch_size, num_mixtures])
+            gamma (Variable of shape [batch_size, num_mixtures])
                 the probability of affiliation of each sample to each mixture.
                 Typically the output of the estimation network.
         """
@@ -66,14 +69,17 @@ class GMM(nn.Module):
             # This function should not be used when we are in eval mode.
             return
 
-        self.Phi.data = torch.mean(mixtures_affiliations, dim=0)
+        gamma_sum = torch.sum(gamma, dim=0)
+        self.phi.data = torch.mean(gamma, dim=0)
 
-        mu_numer = torch.mm(mixtures_affiliations.T, samples)
-        mu_denom = torch.sum(mixtures_affiliations, dim=0).view(-1, 1)
-        self.mu.data = mu_numer / mu_denom
+        self.mu.data = torch.einsum('ik,il->kl', gamma, z) / gamma_sum[:, None]
 
-        diff = samples[None] - self.mu[:, None]
-        # diff has shape [num_mixtures, batch_size, dimension_embedding]
-        gamma = mixtures_affiliations.T[:, :, None]
-        sigma_numer = torch.matmul(torch.transpose(diff * gamma, 1, 2), diff)
-        self.Sigma.data = sigma_numer / mu_denom.view(-1, 1, 1) + self.eps_Sigma
+        diff = torch.sqrt(gamma[:, :, None]) * (z[:, None] - self.mu[None])
+        # diff has shape [batch_size, num_mixtures, dimension_embedding]
+        self.sigma.data = torch.einsum('ikl,ikm->klm', diff, diff) / gamma_sum[:, None, None]
+        self.sigma.data += self.eps_sigma.data
+
+        self.L.data = torch.cholesky(self.sigma)
+
+    def cov_diag_loss(self):
+        return torch.sum(1. / torch.diagonal(self.sigma, dim1=1, dim2=2))
