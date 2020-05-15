@@ -14,7 +14,8 @@ class DAGMM(nn.Module):
     def __init__(self, input_size, comp_hiddens, comp_activation,
                  est_hiddens, est_activation, est_dropout_rate=0.5,
                  n_epoch=100, batch_size=128, learning_rate=1e-4,
-                 lambda1=0.1, lambda2=0.005, device='cpu', random_seed=321):
+                 lambda1=0.1, lambda2=0.005, device='cpu', 
+                 verbose=True, random_seed=321):
         """
         Args:
             input_size: int
@@ -50,6 +51,8 @@ class DAGMM(nn.Module):
                 (for sum of diagonal elements of covariance)
             device: str (optional)
                 'cpu' or 'cuda' ('cuda:x')
+            verbose: bool (optional)
+                print training loss when set to True.
             random_seed: int (optional)
                 random seed, used when fit() called.
         """
@@ -68,6 +71,7 @@ class DAGMM(nn.Module):
         self.lambda1 = lambda1
         self.lambda2 = lambda2
         self.device = torch.device(device)
+        self.verbose = verbose
         self.random_seed = random_seed
         self.eps = nn.Parameter(torch.Tensor([1e-6]), requires_grad=False)
 
@@ -126,8 +130,9 @@ class DAGMM(nn.Module):
                 loss.backward()
                 optimizer.step()
 
-            if (epoch + 1) % 100 == 0:
-                print(f"epoch {epoch+1}/{self.n_epoch} : loss = {loss.item():.3f}")
+            if self.verbose:
+                if (epoch + 1) % 100 == 0:
+                    print(f"epoch {epoch+1}/{self.n_epoch} : loss = {loss.item():.3f}")
 
     def predict(self, x):
         """Calculate anormaly scores (sample energy) on samples in X.
@@ -141,6 +146,7 @@ class DAGMM(nn.Module):
                 Calculated sample energies.
         """
         x = torch.from_numpy(x.astype(np.float32)).to(self.device)
+        self.eval()
         if self.device == torch.device('cuda'):
             return self(x).detach().cpu().numpy()
         else:
